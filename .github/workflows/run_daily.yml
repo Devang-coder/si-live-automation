@@ -2,7 +2,7 @@ name: Run SI Live Daily
 
 on:
   schedule:
-    - cron: '10 16 * * *'  # Runs every day at 9:40 PM IST (16:10 UTC)
+    - cron: '30 17 * * *'  # Runs every day at 11:00 PM IST (17:30 UTC)
   workflow_dispatch:
 
 jobs:
