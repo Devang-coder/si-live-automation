@@ -1,0 +1,28 @@
+name: Run SI Live Daily
+
+on:
+  schedule:
+    # 12:30 PM IST = 07:00 UTC
+    - cron: '0 7 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run-si-live:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance joblib pandas numpy statsmodels openpyxl \
+                     google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+      - name: Run SI Live script
+        run: |
+          python si_live.py
