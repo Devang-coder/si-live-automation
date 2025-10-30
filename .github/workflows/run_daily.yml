@@ -48,18 +48,14 @@ jobs:
         file_path = "live_portfolio_results.json"
         file_name = "live_portfolio_results.json"
 
-        # Search for existing file
-        results = service.files().list(q=f"name='{file_name}' and trashed=false", fields="files(id)").execute()
-        files = results.get("files", [])
+        # ✅ Fixed: Always update an existing file (avoid storage quota issue)
+        # Your Drive file ID (shared with the service account)
+        file_id = "1FtxoyquFx3q0wU1QELX830UfrByvIRou"
 
-        if files:
-            file_id = files[0]["id"]
+        try:
             media = MediaFileUpload(file_path, mimetype="application/json")
             updated = service.files().update(fileId=file_id, media_body=media).execute()
             print("✅ File updated successfully:", updated.get("id"))
-        else:
-            file_metadata = {"name": file_name}
-            media = MediaFileUpload(file_path, mimetype="application/json")
-            uploaded = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-            print("✅ File uploaded successfully:", uploaded.get("id"))
+        except Exception as e:
+            print("❌ Failed to update file:", e)
         EOF
