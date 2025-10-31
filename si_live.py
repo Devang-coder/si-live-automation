@@ -1,4 +1,4 @@
-# si_live.py — Automated SI Live update (downloads from Google Drive, Prophet-free, supports Google Sheets)
+# si_live.py — Automated SI Live update (downloads from Google Drive, now includes Prophet forecast)
 
 import io
 import json
@@ -13,6 +13,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from statsmodels.tsa.arima.model import ARIMA
+from prophet import Prophet  # ✅ Added Prophet
 
 warnings.filterwarnings("ignore")
 print("✅ Libraries imported successfully.")
@@ -24,18 +25,15 @@ creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FI
 drive = build("drive", "v3", credentials=creds)
 
 # === 2️⃣ Google Drive file IDs ===
-# Model and metadata
-COLUMNS_FILE_ID = "1QfLLd318OnSafRJZNVubmMgVQqfKib5N"   # xgb_model_columns.json
-MODEL_FILE_ID = "1b37nDV7ZZl3pEZM6xDlIDWqNkToKc0DA"     # xgb_portfolio_model.pkl
-# Google Sheet instead of Excel
-PORTFOLIO_FILE_ID = "1GF4NQi92ojcpgUoikO4zIltfEkgiZuBy"  # Devang Portfolio (Google Sheet)
-# Output JSON on Drive
+COLUMNS_FILE_ID = "1QfLLd318OnSafRJZNVubmMgVQqfKib5N"
+MODEL_FILE_ID = "1b37nDV7ZZl3pEZM6xDlIDWqNkToKc0DA"
+PORTFOLIO_FILE_ID = "1GF4NQi92ojcpgUoikO4zIltfEkgiZuBy"
 RESULT_JSON_FILE_ID = "1FtxoyquFx3q0wU1QELX830UfrByvIRou"
 
 # === 3️⃣ Local file paths ===
 COLUMNS_PATH = "xgb_model_columns.json"
 MODEL_PATH = "xgb_portfolio_model.pkl"
-PORTFOLIO_PATH = "Devang_Portfolio_25.xlsx"  # will be downloaded from Sheets
+PORTFOLIO_PATH = "Devang_Portfolio_25.xlsx"
 OUTPUT_PATH = "live_portfolio_results.json"
 
 
@@ -134,7 +132,8 @@ live_X = pd.concat([live_X, live_df_encoded]).fillna(0)[model_columns]
 # === 1️⃣1️⃣ Model prediction ===
 predicted_prices_xgb = model.predict(live_X)
 
-# === 1️⃣2️⃣ Monte Carlo + ARIMA forecasts ===
+
+# === 1️⃣2️⃣ Forecasting (Prophet + ARIMA + Monte Carlo) ===
 def run_monte_carlo(price_history, horizon_days=90, n_sims=1000):
     prices = price_history.dropna().values
     if len(prices) < 30:
@@ -162,15 +161,31 @@ def run_arima_forecast(price_series, horizon_days=90):
         return np.nan
 
 
-monte_carlo_results, arima_results = [], []
+def run_prophet_forecast(price_series, horizon_days=90):
+    try:
+        df = pd.DataFrame({"ds": price_series.index, "y": price_series.values})
+        model = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+        model.fit(df)
+        future = model.make_future_dataframe(periods=horizon_days)
+        forecast = model.predict(future)
+        return float(forecast["yhat"].iloc[-1])
+    except Exception:
+        return np.nan
+
+
+prophet_results, arima_results, monte_carlo_results = [], [], []
+
 if history_data is not None:
+    print("🔮 Running Prophet + ARIMA + Monte Carlo...")
     for stock in stock_names:
-        price_series = history_data[f"{stock}.NS"].dropna()
-        monte_carlo_results.append(run_monte_carlo(price_series))
-        arima_results.append(run_arima_forecast(price_series))
+        series = history_data[f"{stock}.NS"].dropna()
+        prophet_results.append(run_prophet_forecast(series))
+        arima_results.append(run_arima_forecast(series))
+        monte_carlo_results.append(run_monte_carlo(series))
 else:
-    monte_carlo_results = [np.nan] * len(stock_names)
+    prophet_results = [np.nan] * len(stock_names)
     arima_results = [np.nan] * len(stock_names)
+    monte_carlo_results = [np.nan] * len(stock_names)
 
 print("✅ Forecasting complete.")
 
@@ -180,15 +195,13 @@ results_df = pd.DataFrame({
     "Stock": last_snapshot_df["Top Stock"],
     "Current_LTP": live_df["LTP"],
     "XGB_Prediction": predicted_prices_xgb,
+    "Prophet_90d_Forecast": prophet_results,
     "ARIMA_90d_Forecast": arima_results,
     "VaR_5_Pct_90d": monte_carlo_results,
 })
-results_df["XGB_Change_%"] = (
-    (results_df["XGB_Prediction"] - results_df["Current_LTP"]) / results_df["Current_LTP"] * 100
-)
-results_df["ARIMA_Change_%"] = (
-    (results_df["ARIMA_90d_Forecast"] - results_df["Current_LTP"]) / results_df["Current_LTP"] * 100
-)
+results_df["XGB_Change_%"] = (results_df["XGB_Prediction"] - results_df["Current_LTP"]) / results_df["Current_LTP"] * 100
+results_df["Prophet_Change_%"] = (results_df["Prophet_90d_Forecast"] - results_df["Current_LTP"]) / results_df["Current_LTP"] * 100
+results_df["ARIMA_Change_%"] = (results_df["ARIMA_90d_Forecast"] - results_df["Current_LTP"]) / results_df["Current_LTP"] * 100
 
 output = {
     "last_updated_iso": datetime.now().isoformat(),
