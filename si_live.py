@@ -1,5 +1,4 @@
 # si_live.py — Automated SI Live update (downloads from Google Drive, now includes Prophet forecast)
-
 import io
 import json
 import warnings
@@ -209,15 +208,37 @@ output = {
     "data": results_df.to_dict("records"),
 }
 
+# ✅ FIXED: Replace NaN, inf, -inf with None before saving to JSON
+def clean_nans(obj):
+    if isinstance(obj, dict):
+        return {k: clean_nans(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_nans(v) for v in obj]
+    elif isinstance(obj, float):
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        else:
+            return obj
+    else:
+        return obj
+
+cleaned_output = clean_nans(output)
+
 with open(OUTPUT_PATH, "w") as f:
-    json.dump(output, f, indent=4)
+    json.dump(cleaned_output, f, indent=4, ensure_ascii=False)
+
 print(f"✅ JSON saved locally to {OUTPUT_PATH}")
 
 
 # === 1️⃣4️⃣ Upload result JSON back to Google Drive ===
 try:
+    # Verify JSON is valid before upload
+    with open(OUTPUT_PATH, "r") as f:
+        json.load(f)
     media = MediaFileUpload(OUTPUT_PATH, mimetype="application/json", resumable=True)
     drive.files().update(fileId=RESULT_JSON_FILE_ID, media_body=media).execute()
     print("✅ Uploaded updated JSON to Google Drive successfully.")
+except json.JSONDecodeError:
+    print("❌ JSON invalid — skipping upload.")
 except Exception as e:
     print(f"❌ Failed to upload to Drive: {e}")
